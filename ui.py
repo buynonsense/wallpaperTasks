@@ -11,6 +11,7 @@ from PyQt6.QtGui import QIcon, QAction
 from task_manager import TaskManager
 from wallpaper_manager import WallpaperManager
 from logo_generator import create_logo
+from style_manager import StyleManager
 
 class MarkdownEditor(QDialog):
     """Markdown编辑对话框"""
@@ -70,6 +71,7 @@ class MainWindow(QMainWindow):
         # 加载设置
         self.settings = QSettings("WallpaperTasks", "Application")
         self.font_size = self.settings.value("font_size", 24, type=int)
+        self.style_name = self.settings.value("style_name", "现代蓝", type=str)
         
         # 初始化管理器
         self.task_manager = TaskManager()
@@ -78,88 +80,6 @@ class MainWindow(QMainWindow):
         
         # 初始刷新壁纸
         self.wallpaper_manager.refresh_wallpaper()
-        
-        # 设置整体样式 - 现代年轻化风格
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f8f9fa;
-            }
-            QGroupBox {
-                background-color: white;
-                border: 1px solid #eaeaea;
-                border-radius: 8px;
-                margin-top: 14px;
-                font-weight: bold;
-                font-size: 14px;
-                padding: 8px;
-                color: #333;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
-                color: #444;
-            }
-            QPushButton {
-                background-color: #ffffff;
-                border: 1px solid #eaeaea;
-                padding: 8px 16px;
-                border-radius: 6px;
-                color: #555;
-                font-weight: 500;
-                font-size: 13px;
-                min-height: 36px;
-            }
-            QPushButton:hover {
-                background-color: #f0f7ff;
-                color: #2d8cf0;
-                border-color: #d4e8ff;
-            }
-            QPushButton:pressed {
-                background-color: #e0f0ff;
-                border-color: #2d8cf0;
-                color: #2d8cf0;
-            }
-            QListWidget {
-                background-color: white;
-                border: 1px solid #eaeaea;
-                border-radius: 8px;
-                padding: 8px;
-                font-size: 14px;
-                selection-background-color: #f0f7ff;
-            }
-            QLabel {
-                color: #333;
-                font-size: 14px;
-            }
-            QSlider::handle:horizontal {
-                background: #2d8cf0;
-                border: 1px solid #2d8cf0;
-                width: 16px;
-                height: 16px;
-                margin: -7px 0;
-                border-radius: 8px;
-            }
-            QSlider::groove:horizontal {
-                height: 6px;
-                background: #e0e0e0;
-                margin: 0 4px;
-                border-radius: 3px;
-            }
-            QSlider::add-page:horizontal {
-                background: #e0e0e0;
-                border-radius: 3px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #2d8cf0;
-                border-radius: 3px;
-            }
-            QStatusBar {
-                color: #666;
-                font-size: 13px;
-                padding: 4px 6px;
-            }
-        """)
         
         # 设置中心窗口
         central_widget = QWidget()
@@ -213,68 +133,21 @@ class MainWindow(QMainWindow):
         # 任务操作按钮区
         task_buttons_layout = QHBoxLayout()
         
-        # 添加任务按钮 - 蓝色
+        # 添加任务按钮
         self.add_button = QPushButton("添加任务")
         self.add_button.setIcon(QIcon.fromTheme("list-add", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)))
-        self.add_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d8cf0; 
-                color: white; 
-                border-color: #2d8cf0;
-                font-weight: bold;
-                padding: 10px 16px;
-            }
-            QPushButton:hover {
-                background-color: #54a8ff;
-                border-color: #54a8ff;
-            }
-            QPushButton:pressed {
-                background-color: #2a80d8;
-                border-color: #2a80d8;
-            }
-        """)
         
-        # 编辑任务保持默认样式，已有悬停和按下效果
+        # 编辑任务保持默认样式
         self.edit_button = QPushButton("编辑任务")
         self.edit_button.setIcon(QIcon.fromTheme("document-edit", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)))
         
-        # 删除任务按钮 - 红色
+        # 删除任务按钮
         self.delete_button = QPushButton("删除任务")
         self.delete_button.setIcon(QIcon.fromTheme("edit-delete", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton)))
-        self.delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f56c6c; 
-                color: white; 
-                border-color: #f56c6c;
-            }
-            QPushButton:hover {
-                background-color: #ff8585;
-                border-color: #ff8585;
-            }
-            QPushButton:pressed {
-                background-color: #e05858;
-                border-color: #e05858;
-            }
-        """)
         
-        # 完成/未完成按钮 - 绿色
+        # 完成/未完成按钮
         self.complete_button = QPushButton("完成/未完成")
         self.complete_button.setIcon(QIcon.fromTheme("emblem-default", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)))
-        self.complete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #67c23a; 
-                color: white; 
-                border-color: #67c23a;
-            }
-            QPushButton:hover {
-                background-color: #7ed321;
-                border-color: #7ed321;
-            }
-            QPushButton:pressed {
-                background-color: #5daf34;
-                border-color: #5daf34;
-            }
-        """)
         
         task_buttons_layout.addWidget(self.add_button)
         task_buttons_layout.addWidget(self.edit_button)
@@ -287,6 +160,23 @@ class MainWindow(QMainWindow):
         # 设置面板
         settings_panel = QGroupBox("壁纸设置")
         settings_layout = QVBoxLayout(settings_panel)
+        
+        # 添加皮肤选择
+        style_layout = QHBoxLayout()
+        style_layout.addWidget(QLabel("界面风格:"))
+        
+        self.style_combo = QComboBox()
+        for style_name in StyleManager.get_style_names():
+            self.style_combo.addItem(style_name)
+        
+        # 设置当前样式
+        index = self.style_combo.findText(self.style_name)
+        if index >= 0:
+            self.style_combo.setCurrentIndex(index)
+        
+        self.style_combo.currentTextChanged.connect(self.on_style_changed)
+        style_layout.addWidget(self.style_combo)
+        settings_layout.addLayout(style_layout)
         
         # 字体大小设置
         font_layout = QHBoxLayout()
@@ -366,6 +256,9 @@ class MainWindow(QMainWindow):
         # 设置状态栏
         self.statusBar().showMessage("程序已启动", 3000)
         self.statusBar().setStyleSheet("color: #666; padding: 2px 5px;")
+        
+        # 应用初始样式 - 放在组件创建完成后
+        self.apply_style(self.style_name)
 
     def setup_tray_icon(self):
         """设置系统托盘图标"""
@@ -605,3 +498,25 @@ class MainWindow(QMainWindow):
                 # 使用默认字体刷新
                 self.wallpaper_manager.set_font(default_font)
                 self.refresh_wallpaper()
+    
+    def apply_style(self, style_name):
+        """应用指定的界面样式"""
+        # 设置全局样式
+        self.setStyleSheet(StyleManager.get_style(style_name))
+        
+        # 设置彩色按钮样式
+        if hasattr(self, 'add_button'):
+            self.add_button.setStyleSheet(StyleManager.get_colored_button_style(style_name, "add"))
+        if hasattr(self, 'delete_button'):
+            self.delete_button.setStyleSheet(StyleManager.get_colored_button_style(style_name, "delete"))
+        if hasattr(self, 'complete_button'):
+            self.complete_button.setStyleSheet(StyleManager.get_colored_button_style(style_name, "complete"))
+        if hasattr(self, 'refresh_button'):
+            self.refresh_button.setStyleSheet(StyleManager.get_colored_button_style(style_name, "refresh"))
+    
+    def on_style_changed(self, style_name):
+        """界面风格变更处理"""
+        self.style_name = style_name
+        self.settings.setValue("style_name", style_name)
+        self.apply_style(style_name)
+        self.statusBar().showMessage(f"已切换到 {style_name} 风格", 3000)
