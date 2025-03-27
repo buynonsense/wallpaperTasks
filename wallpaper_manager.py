@@ -5,6 +5,10 @@ import ctypes
 from PIL import Image, ImageDraw, ImageFont
 import markdown
 from bs4 import BeautifulSoup
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, QBuffer, QByteArray, QIODevice
+import io
+from markdown_renderer import MarkdownRenderer
 
 class WallpaperManager:
     """壁纸管理器，负责在壁纸上添加任务清单"""
@@ -22,6 +26,9 @@ class WallpaperManager:
         
         # 字体设置 - 固定使用微软雅黑
         self.font_size = 24  # 默认字体大小
+        
+        # 创建Markdown渲染器
+        self.md_renderer = MarkdownRenderer()
         
         # 监听任务变更
         self.task_manager.add_change_listener(self.refresh_wallpaper)
@@ -66,7 +73,7 @@ class WallpaperManager:
             return False
     
     def refresh_wallpaper(self):
-        """刷新壁纸，添加任务列表"""
+        """刷新壁纸，添加任务清单"""
         try:
             # 始终从原始壁纸开始，而不是当前壁纸
             if self.original_wallpaper and os.path.exists(self.original_wallpaper):
@@ -88,122 +95,150 @@ class WallpaperManager:
             
             # 使用圆角矩形背景，更美观
             radius = 20
-            # 绘制圆角矩形
+            # 绘制圆角矩形 - 主体部分
             overlay_draw.rectangle(
                 [task_area[0], task_area[1] + radius, task_area[2], task_area[3] - radius],
                 fill=(30, 30, 40, 160)  # 降低不透明度，提高可读性
             )
+            # 绘制顶部圆角部分
             overlay_draw.rectangle(
-                [task_area[0] + radius, task_area[1], task_area[2] - radius, task_area[3]],
+                [task_area[0] + radius, task_area[1], task_area[2] - radius, task_area[1] + radius],
                 fill=(30, 30, 40, 160)
             )
-            # 绘制四个角
-            overlay_draw.pieslice([task_area[0], task_area[1], task_area[0] + radius * 2, task_area[1] + radius * 2],
-                                180, 270, fill=(30, 30, 40, 160))
-            overlay_draw.pieslice([task_area[2] - radius * 2, task_area[1], task_area[2], task_area[1] + radius * 2],
-                                270, 360, fill=(30, 30, 40, 160))
-            overlay_draw.pieslice([task_area[0], task_area[3] - radius * 2, task_area[0] + radius * 2, task_area[3]],
-                                90, 180, fill=(30, 30, 40, 160))
-            overlay_draw.pieslice([task_area[2] - radius * 2, task_area[3] - radius * 2, task_area[2], task_area[3]],
-                                0, 90, fill=(30, 30, 40, 160))
+            # 绘制底部圆角部分
+            overlay_draw.rectangle(
+                [task_area[0] + radius, task_area[3] - radius, task_area[2] - radius, task_area[3]],
+                fill=(30, 30, 40, 160)
+            )
+            # 绘制四个圆角
+            overlay_draw.ellipse([task_area[0], task_area[1], task_area[0] + radius * 2, task_area[1] + radius * 2],
+                               fill=(30, 30, 40, 160))
+            overlay_draw.ellipse([task_area[2] - radius * 2, task_area[1], task_area[2], task_area[1] + radius * 2],
+                               fill=(30, 30, 40, 160))
+            overlay_draw.ellipse([task_area[0], task_area[3] - radius * 2, task_area[0] + radius * 2, task_area[3]],
+                               fill=(30, 30, 40, 160))
+            overlay_draw.ellipse([task_area[2] - radius * 2, task_area[3] - radius * 2, task_area[2], task_area[3]],
+                               fill=(30, 30, 40, 160))
             
-            # 如果原图没有Alpha通道，转换为RGBA
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
+            # 合并overlay到主图像
+            img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+            draw = ImageDraw.Draw(img)  # 重新创建绘图对象
             
-            # 合并半透明覆盖层
-            img = Image.alpha_composite(img, overlay)
-            img = img.convert('RGB')  # 转回RGB用于保存
-            
-            # 查找微软雅黑字体
-            title_font_size = self.font_size + 14  # 标题字体比正文大一些
-            
+            # 加载字体
             try:
-                # 尝试加载微软雅黑字体
                 font_dir = os.path.join(os.environ['WINDIR'], 'Fonts')
-                font_path = os.path.join(font_dir, 'msyh.ttc')
-                
-                title_font = ImageFont.truetype(font_path, title_font_size)
+                font_path = os.path.join(font_dir, 'msyh.ttc')  # 微软雅黑
+                title_font = ImageFont.truetype(font_path, self.font_size + 12)
                 task_font = ImageFont.truetype(font_path, self.font_size)
-                status_font = ImageFont.truetype(font_path, self.font_size + 2)
+                status_font = ImageFont.truetype(font_path, self.font_size + 4)
             except Exception as e:
-                print(f"加载字体失败: {e}, 使用默认字体")
-                # 使用默认字体
+                print(f"加载字体失败: {e}，使用默认字体")
                 title_font = ImageFont.load_default()
                 task_font = ImageFont.load_default()
                 status_font = ImageFont.load_default()
             
-            # 绘制标题和彩色分隔线
-            draw = ImageDraw.Draw(img)
-            title_text = "今日任务清单"
-            draw.text((task_area[0] + 30, task_area[1] + 30), title_text, 
-                    fill=(240, 240, 255), font=title_font)
+            # 绘制标题
+            title = "任务清单"
+            title_width = draw.textlength(title, font=title_font)
+            title_x = task_area[0] + (task_area[2] - task_area[0] - title_width) // 2
+            draw.text((title_x, task_area[1] + 20), title, fill=(255, 255, 255), font=title_font)
             
-            # 绘制分隔线
-            line_y = task_area[1] + 90
-            draw.line([(task_area[0] + 20, line_y), (task_area[2] - 20, line_y)], 
-                    fill=(100, 150, 250), width=3)
+            # 获取任务列表 - 只显示未完成的任务
+            all_tasks = self.task_manager.get_all_tasks()
+            tasks = [task for task in all_tasks if not task["is_completed"]]
             
-            # 获取任务列表
-            tasks = self.task_manager.get_all_tasks()
+            # 任务起始Y坐标
+            y_pos = task_area[1] + 80
+            task_width = task_area[2] - task_area[0] - 90  # 为状态图标留出空间
             
-            # 绘制任务，使用更好的文本换行
-            y_pos = line_y + 40
-            task_width = task_area[2] - task_area[0] - 80  # 可用于文本的宽度
-            
+            # 处理任务列表 - 不再显示任务状态图标（移除方框）
             for task in tasks:
-                # 处理Markdown内容
                 try:
-                    html = markdown.markdown(task["content"])
-                    soup = BeautifulSoup(html, "html.parser")
-                    text = soup.get_text()
-                except:
-                    # 如果Markdown处理失败，直接使用原文本
+                    # 使用Markdown渲染器渲染任务内容
+                    md_width = task_area[2] - task_area[0] - 50  # 不再为状态图标留空间
+                    rendered_pixmap = self.md_renderer.render_markdown(
+                        task["content"], 
+                        width=md_width, 
+                        font_size=self.font_size, 
+                        completed=False  # 已完成任务不会显示
+                    )
+                    
+                    # 检查QPixmap是否有效
+                    if rendered_pixmap.isNull():
+                        raise RuntimeError("渲染的QPixmap无效")
+                    
+                    # 将QPixmap转换为PIL Image
+                    arr = QByteArray()
+                    qbuf = QBuffer(arr)
+                    qbuf.open(QIODevice.OpenModeFlag.WriteOnly)
+                    rendered_pixmap.save(qbuf, b"PNG")
+                    
+                    buffer = io.BytesIO(bytes(arr))
+                    md_image = Image.open(buffer).convert("RGBA")
+                    
+                    # 计算粘贴位置 - 不再缩进
+                    paste_x = task_area[0] + 30  # 从30像素开始，而不是70
+                    paste_y = y_pos
+                    
+                    # 粘贴到壁纸上
+                    img.paste(md_image, (paste_x, paste_y), md_image)
+                    
+                    # 更新下一个任务的y位置
+                    y_pos += md_image.height + 25  # 任务间距
+                    
+                except Exception as e:
+                    print(f"渲染Markdown失败，回退到纯文本: {e}")
+                    # 回退到纯文本渲染
                     text = task["content"]
-                
-                # 根据任务状态选择颜色
-                color = (180, 180, 180) if task["is_completed"] else (255, 255, 255)
-                status_color = (150, 255, 150) if task["is_completed"] else (255, 255, 255)
-                
-                # 绘制任务完成状态
-                status = "✓" if task["is_completed"] else "◯"
-                draw.text((task_area[0] + 25, y_pos), status, fill=status_color, font=status_font)
-                
-                # 处理文本换行 - 考虑字符宽度
-                lines = []
-                current_line = ""
-                max_chars = 30  # 根据更大的字体，减少每行字符数
-                
-                words = text.split()
-                for word in words:
-                    if len(current_line + " " + word if current_line else word) <= max_chars:
-                        current_line += (" " + word if current_line else word)
-                    else:
+                    color = (180, 180, 180) if task["is_completed"] else (255, 255, 255)
+                    
+                    # 处理文本换行
+                    lines = []
+                    current_line = ""
+                    max_chars = int(70 * (24 / self.font_size))  # 根据字体大小调整每行字符数
+                    
+                    words = text.split()
+                    for word in words:
+                        if len(current_line + " " + word if current_line else word) <= max_chars:
+                            current_line += (" " + word if current_line else word)
+                        else:
+                            lines.append(current_line)
+                            current_line = word
+                    
+                    if current_line:
                         lines.append(current_line)
-                        current_line = word
-                
-                if current_line:
-                    lines.append(current_line)
-                
-                # 显示文本
-                text_x = task_area[0] + 70
-                for i, line in enumerate(lines[:3]):  # 限制最多3行
-                    draw.text((text_x, y_pos + i * 36), line, fill=color, font=task_font)
-                
-                # 如果有更多行但未显示，添加省略号
-                if len(lines) > 3:
-                    draw.text((text_x, y_pos + 3 * 36), "...", fill=color, font=task_font)
+                    
+                    # 显示文本 - 不再缩进
+                    text_x = task_area[0] + 30  # 从30像素开始，而不是70
+                    line_height = int(self.font_size * 1.5)
+                    for i, line in enumerate(lines[:3]):  # 限制最多3行
+                        draw.text((text_x, y_pos + i * line_height), line, fill(color), font(task_font))
+                    
+                    # 如果有更多行但未显示，添加省略号
+                    if len(lines) > 3:
+                        draw.text((text_x, y_pos + 3 * line_height), "...", fill(color), font(task_font))
+                    
+                    # 更新下一个任务的Y位置
+                    line_count = min(len(lines), 3) + (1 if len(lines) > 3 else 0)
+                    y_pos += line_count * line_height + 20  # 任务间距
                 
                 # 避免任务超出区域
-                if y_pos > task_area[3] - 40:
+                if y_pos > task_area[3] - 60:
                     draw.text((task_area[0] + 70, y_pos), "更多任务...", fill=(255, 255, 255), font=task_font)
                     break
             
-            # 如果没有任务，显示提示信息
+            # 如果没有未完成任务，显示提示信息
             if not tasks:
+                if all_tasks:
+                    # 有任务但都已完成
+                    message = '所有任务已完成！'
+                else:
+                    # 没有任务
+                    message = '暂无任务，点击"添加任务"开始'
+                    
                 draw.text(
-                    (task_area[0] + 70, y_pos), 
-                    '暂无任务，点击"添加任务"开始',
+                    (task_area[0] + 30, task_area[1] + 120), 
+                    message,
                     fill=(200, 200, 200), 
                     font=task_font
                 )
@@ -212,12 +247,11 @@ class WallpaperManager:
             output_path = os.path.join(self.temp_dir, "wallpaper_with_tasks.jpg")
             img.save(output_path, quality=95)
             
-            # 设置为壁纸
-            self._set_wallpaper(output_path)
+            # 设置为桌面壁纸
+            return self._set_wallpaper(output_path)
             
-            return True
-        except Exception as e:
-            print(f"刷新壁纸失败: {e}")
+        except Exception as error:
+            print(f"刷新壁纸失败: {error}")
             import traceback
             traceback.print_exc()
             return False

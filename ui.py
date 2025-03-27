@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("桌面壁纸任务清单")
-        self.resize(800, 600)  # 更大的窗口尺寸
+        self.resize(800, 800)  # 增加窗口高度从600到800
         
         # 设置应用图标
         app_icon = create_logo()
@@ -101,16 +101,45 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(info_panel)
         
-        # 任务列表面板
+        # 任务列表面板 - 添加选项卡
         tasks_panel = QGroupBox("任务列表")
         tasks_layout = QVBoxLayout(tasks_panel)
         
-        # 任务列表
+        # 添加已完成/未完成任务切换
+        task_filter_layout = QHBoxLayout()
+        self.show_active_button = QPushButton("待办任务")
+        self.show_completed_button = QPushButton("已完成")
+        
+        # 设置初始状态
+        self.show_active_button.setChecked(True)
+        self.show_active_button.setStyleSheet("font-weight: bold;")
+        
+        self.show_active_button.clicked.connect(lambda: self.filter_tasks("active"))
+        self.show_completed_button.clicked.connect(lambda: self.filter_tasks("completed"))
+        
+        task_filter_layout.addWidget(self.show_active_button)
+        task_filter_layout.addWidget(self.show_completed_button)
+        task_filter_layout.addStretch(1)
+        
+        tasks_layout.addLayout(task_filter_layout)
+        
+        # 任务列表 - 修复滚动问题
         self.task_list = QListWidget()
         self.task_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.task_list.customContextMenuRequested.connect(self.show_context_menu)
         self.task_list.setAlternatingRowColors(True)
+        self.task_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)  # 确保显示滚动条
+        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.task_list.setMinimumHeight(300)  # 设置最小高度确保有足够空间
         self.task_list.setStyleSheet("""
+            QListWidget {
+                background-color: white;
+                border: 1px solid #eaeaea;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 14px;
+                selection-background-color: #f0f7ff;
+            }
             QListWidget::item {
                 padding: 12px 8px;
                 border-bottom: 1px solid #f0f0f0;
@@ -126,6 +155,24 @@ class MainWindow(QMainWindow):
             }
             QListWidget::item:alternate {
                 background-color: #fcfcfc;
+            }
+            /* 确保滚动条可见 */
+            QScrollBar:vertical {
+                border: none;
+                background: #f5f5f5;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c1c1c1;
+                min-height: 30px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a8a8a8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
         tasks_layout.addWidget(self.task_list)
@@ -184,11 +231,11 @@ class MainWindow(QMainWindow):
         font_layout.addWidget(QLabel("小"), 0)
         
         self.font_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_slider.setMinimum(16)
-        self.font_slider.setMaximum(40)
-        self.font_slider.setValue(self.font_size)
+        self.font_slider.setMinimum(12)  # 降低最小值
+        self.font_slider.setMaximum(24)  # 降低最大值
+        self.font_slider.setValue(min(self.font_size, 24))  # 确保当前值在新范围内
         self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.font_slider.setTickInterval(4)
+        self.font_slider.setTickInterval(2)  # 调整刻度间隔
         font_layout.addWidget(self.font_slider, 1)
         
         font_layout.addWidget(QLabel("大"), 0)
@@ -259,6 +306,9 @@ class MainWindow(QMainWindow):
         
         # 应用初始样式 - 放在组件创建完成后
         self.apply_style(self.style_name)
+        
+        # 初始化过滤状态
+        self.current_filter = "active"
 
     def setup_tray_icon(self):
         """设置系统托盘图标"""
@@ -330,11 +380,20 @@ class MainWindow(QMainWindow):
         QApplication.quit()
     
     def load_tasks(self):
-        """加载任务列表"""
+        """加载任务列表，根据过滤条件显示"""
         self.task_list.clear()
         
         tasks = self.task_manager.get_all_tasks()
-        for task in tasks:
+        
+        # 根据过滤条件显示任务
+        if hasattr(self, 'current_filter') and self.current_filter == "completed":
+            # 仅显示已完成任务
+            filtered_tasks = [task for task in tasks if task["is_completed"]]
+        else:
+            # 默认显示未完成任务
+            filtered_tasks = [task for task in tasks if not task["is_completed"]]
+        
+        for task in filtered_tasks:
             item = QListWidgetItem()
             
             # 设置任务文本
@@ -354,6 +413,12 @@ class MainWindow(QMainWindow):
                 item.setForeground(Qt.GlobalColor.gray)
             
             self.task_list.addItem(item)
+            
+        # 如果是已完成任务列表，修改按钮文本
+        if hasattr(self, 'current_filter') and self.current_filter == "completed":
+            self.complete_button.setText("标记为未完成")
+        else:
+            self.complete_button.setText("标记为已完成")
     
     def add_task(self):
         """添加新任务"""
@@ -520,3 +585,18 @@ class MainWindow(QMainWindow):
         self.settings.setValue("style_name", style_name)
         self.apply_style(style_name)
         self.statusBar().showMessage(f"已切换到 {style_name} 风格", 3000)
+    
+    def filter_tasks(self, filter_type):
+        """过滤任务列表显示"""
+        self.current_filter = filter_type
+        
+        # 更新按钮样式
+        if filter_type == "active":
+            self.show_active_button.setStyleSheet("font-weight: bold;")
+            self.show_completed_button.setStyleSheet("")
+        else:
+            self.show_active_button.setStyleSheet("")
+            self.show_completed_button.setStyleSheet("font-weight: bold;")
+        
+        # 重新加载任务
+        self.load_tasks()
