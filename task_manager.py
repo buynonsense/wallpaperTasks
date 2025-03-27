@@ -39,7 +39,16 @@ class TaskManager:
         if os.path.exists(self.data_path):
             try:
                 with open(self.data_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    tasks = json.load(f)
+                    
+                    # 兼容旧数据，添加标题字段
+                    for task in tasks:
+                        if "title" not in task:
+                            # 使用内容的第一行作为标题
+                            first_line = task["content"].split('\n')[0]
+                            task["title"] = first_line[:50]  # 限制标题长度
+                    
+                    return tasks
             except Exception as e:
                 print(f"加载任务数据出错: {e}")
                 return []
@@ -58,10 +67,11 @@ class TaskManager:
         """获取所有任务"""
         return self.tasks.copy()
     
-    def add_task(self, content):
+    def add_task(self, title, content=""):
         """添加新任务"""
         task = {
             "id": str(uuid.uuid4()),
+            "title": title,  # 新增标题字段
             "content": content,
             "is_completed": False,
             "created_at": datetime.now().isoformat(),
@@ -72,10 +82,12 @@ class TaskManager:
         self._notify_changed()
         return task
     
-    def update_task(self, task_id, content=None, is_completed=None):
+    def update_task(self, task_id, title=None, content=None, is_completed=None):
         """更新任务"""
         for task in self.tasks:
             if task["id"] == task_id:
+                if title is not None:
+                    task["title"] = title
                 if content is not None:
                     task["content"] = content
                 if is_completed is not None:

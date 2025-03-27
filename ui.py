@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QPushButton, QListWidget, QListWidgetItem, QDialog, 
                             QTextEdit, QLabel, QFileDialog, QMessageBox, QMenu,
                             QSystemTrayIcon, QApplication, QSlider, QGroupBox, QStyle,
-                            QComboBox)
+                            QComboBox, QLineEdit)
 from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QIcon, QAction
 
@@ -12,10 +12,12 @@ from task_manager import TaskManager
 from wallpaper_manager import WallpaperManager
 from logo_generator import create_logo
 from style_manager import StyleManager
+from wallpaper_preview import WallpaperPreview
+from wallpaper_settings import WallpaperSettingsDialog
 
 class MarkdownEditor(QDialog):
     """Markdown编辑对话框"""
-    def __init__(self, content="", parent=None):
+    def __init__(self, title="", content="", parent=None):
         super().__init__(parent)
         self.setWindowTitle("编辑任务")
         self.resize(600, 400)
@@ -23,21 +25,28 @@ class MarkdownEditor(QDialog):
         # 创建布局
         layout = QVBoxLayout(self)
         
+        # 标题编辑区域
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(QLabel("任务标题:"))
+        self.title_edit = QLineEdit(title)
+        self.title_edit.setPlaceholderText("输入任务标题...")
+        title_layout.addWidget(self.title_edit)
+        layout.addLayout(title_layout)
+        
         # 添加说明标签
-        help_text = """支持Markdown语法：
+        help_text = """任务内容 (支持Markdown语法)：
 # 标题
 **粗体**
 *斜体*
 - 列表项
-1. 有序列表
-[链接](https://example.com)"""
+1. 有序列表"""
         
         help_label = QLabel(help_text)
         layout.addWidget(help_label)
         
-        # 编辑器
+        # 内容编辑器
         self.editor = QTextEdit()
-        self.editor.setPlaceholderText("在这里输入任务内容...")
+        self.editor.setPlaceholderText("在这里输入任务详细内容...")
         self.editor.setText(content)
         layout.addWidget(self.editor)
         
@@ -52,6 +61,10 @@ class MarkdownEditor(QDialog):
         # 连接信号
         self.save_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
+    
+    def get_title(self):
+        """获取编辑后的标题"""
+        return self.title_edit.text()
     
     def get_content(self):
         """获取编辑后的内容"""
@@ -77,6 +90,28 @@ class MainWindow(QMainWindow):
         self.task_manager = TaskManager()
         self.wallpaper_manager = WallpaperManager(self.task_manager)
         self.wallpaper_manager.set_font_size(self.font_size)
+        
+        # 从设置中加载任务区域位置
+        try:
+            position = self.settings.value("task_position", [0.5, 0.15, 0.95, 0.95])
+            
+            # 验证并修复位置数据
+            if not isinstance(position, list) or len(position) != 4:
+                position = [0.5, 0.15, 0.95, 0.95]
+            
+            # 确保所有值都是浮点数并在有效范围内
+            position = [
+                float(val) if isinstance(val, (int, float, str)) and 0 <= float(val) <= 1 else 0.5 
+                for val in position
+            ]
+            
+            # 应用位置设置
+            self.wallpaper_manager.set_task_area(*position)
+            
+        except Exception as e:
+            print(f"加载任务位置设置出错: {e}")
+            # 使用默认位置
+            self.wallpaper_manager.set_task_area(0.5, 0.15, 0.95, 0.95)
         
         # 初始刷新壁纸
         self.wallpaper_manager.refresh_wallpaper()
@@ -138,20 +173,23 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 8px;
                 font-size: 14px;
-                selection-background-color: #f0f7ff;
+                selection-background-color: #e5f1ff;
             }
             QListWidget::item {
                 padding: 12px 8px;
                 border-bottom: 1px solid #f0f0f0;
                 font-size: 15px;
+                border-radius: 4px;
+                margin: 2px 0px;
             }
             QListWidget::item:selected {
-                background-color: #f0f7ff;
+                background-color: #e5f1ff;
                 color: #2d8cf0;
-                border-radius: 6px;
+                border: 1px solid #a0cfff;
+                border-left: 4px solid #2d8cf0;
             }
             QListWidget::item:hover {
-                background-color: #fafbfc;
+                background-color: #f5f9ff;
             }
             QListWidget::item:alternate {
                 background-color: #fcfcfc;
@@ -175,6 +213,7 @@ class MainWindow(QMainWindow):
                 height: 0px;
             }
         """)
+        self.task_list.itemDoubleClicked.connect(self.edit_task)
         tasks_layout.addWidget(self.task_list)
         
         # 任务操作按钮区
@@ -204,11 +243,16 @@ class MainWindow(QMainWindow):
         tasks_layout.addLayout(task_buttons_layout)
         main_layout.addWidget(tasks_panel, 1)  # 让任务列表区域占据更多空间
         
-        # 设置面板
+        # 设置面板 - 简化后的版本
         settings_panel = QGroupBox("壁纸设置")
         settings_layout = QVBoxLayout(settings_panel)
         
-        # 添加皮肤选择
+        # 添加打开设置按钮
+        wallpaper_settings_button = QPushButton("打开壁纸位置设置...")
+        wallpaper_settings_button.clicked.connect(self.open_wallpaper_settings)
+        settings_layout.addWidget(wallpaper_settings_button)
+        
+        # 添加皮肤选择 (保留此功能)
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("界面风格:"))
         
@@ -225,22 +269,6 @@ class MainWindow(QMainWindow):
         style_layout.addWidget(self.style_combo)
         settings_layout.addLayout(style_layout)
         
-        # 字体大小设置
-        font_layout = QHBoxLayout()
-        font_layout.addWidget(QLabel("壁纸字体大小:"))
-        font_layout.addWidget(QLabel("小"), 0)
-        
-        self.font_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_slider.setMinimum(12)  # 降低最小值
-        self.font_slider.setMaximum(24)  # 降低最大值
-        self.font_slider.setValue(min(self.font_size, 24))  # 确保当前值在新范围内
-        self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.font_slider.setTickInterval(2)  # 调整刻度间隔
-        font_layout.addWidget(self.font_slider, 1)
-        
-        font_layout.addWidget(QLabel("大"), 0)
-        settings_layout.addLayout(font_layout)
-        
         # 壁纸控制按钮
         wallpaper_buttons = QHBoxLayout()
         
@@ -256,23 +284,6 @@ class MainWindow(QMainWindow):
         
         self.refresh_button = QPushButton("刷新壁纸")
         self.refresh_button.setIcon(QIcon.fromTheme("view-refresh", self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)))
-        self.refresh_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d8cf0;
-                color: white;
-                border-color: #2d8cf0;
-                font-weight: bold;
-                padding: 10px 16px;
-            }
-            QPushButton:hover {
-                background-color: #54a8ff;
-                border-color: #54a8ff;
-            }
-            QPushButton:pressed {
-                background-color: #2a80d8;
-                border-color: #2a80d8;
-            }
-        """)
         
         self.restore_button = QPushButton("恢复原壁纸")
         self.restore_button.setIcon(QIcon.fromTheme("edit-undo", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton)))
@@ -292,7 +303,6 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export_tasks)
         self.refresh_button.clicked.connect(self.refresh_wallpaper)
         self.restore_button.clicked.connect(self.restore_wallpaper)
-        self.font_slider.valueChanged.connect(self.on_font_size_changed)
         
         # 创建系统托盘
         self.setup_tray_icon()
@@ -396,14 +406,17 @@ class MainWindow(QMainWindow):
         for task in filtered_tasks:
             item = QListWidgetItem()
             
-            # 设置任务文本
-            display_text = task["content"]
-            if len(display_text) > 50:  # 限制显示长度
-                display_text = display_text[:47] + "..."
+            # 获取任务标题和内容
+            if "title" in task and task["title"].strip():
+                display_text = task["title"]
+            else:
+                # 对于旧任务数据可能没有标题，使用内容的第一行
+                display_text = task["content"].split('\n')[0]
+                if len(display_text) > 50:
+                    display_text = display_text[:47] + "..."
             
-            # 添加完成状态标记
-            prefix = "✓ " if task["is_completed"] else "□ "
-            item.setText(prefix + display_text)
+            # 直接设置文本，移除前缀复选框
+            item.setText(display_text)
             
             # 存储完整任务数据
             item.setData(Qt.ItemDataRole.UserRole, task)
@@ -411,10 +424,14 @@ class MainWindow(QMainWindow):
             # 设置已完成任务的样式
             if task["is_completed"]:
                 item.setForeground(Qt.GlobalColor.gray)
+                # 添加删除线效果
+                font = item.font()
+                font.setStrikeOut(True)
+                item.setFont(font)
             
             self.task_list.addItem(item)
             
-        # 如果是已完成任务列表，修改按钮文本
+        # 根据当前过滤类型设置按钮文本
         if hasattr(self, 'current_filter') and self.current_filter == "completed":
             self.complete_button.setText("标记为未完成")
         else:
@@ -424,9 +441,10 @@ class MainWindow(QMainWindow):
         """添加新任务"""
         dialog = MarkdownEditor(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            title = dialog.get_title()
             content = dialog.get_content()
-            if content.strip():
-                self.task_manager.add_task(content)
+            if title.strip() or content.strip():
+                self.task_manager.add_task(title, content)
                 self.load_tasks()
     
     def edit_task(self):
@@ -434,11 +452,15 @@ class MainWindow(QMainWindow):
         current_item = self.task_list.currentItem()
         if current_item:
             task = current_item.data(Qt.ItemDataRole.UserRole)
-            dialog = MarkdownEditor(task["content"], parent=self)
+            title = task.get("title", "")
+            content = task.get("content", "")
+            
+            dialog = MarkdownEditor(title, content, parent=self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                content = dialog.get_content()
-                if content.strip():
-                    self.task_manager.update_task(task["id"], content=content)
+                new_title = dialog.get_title()
+                new_content = dialog.get_content()
+                if new_title.strip() or new_content.strip():
+                    self.task_manager.update_task(task["id"], title=new_title, content=new_content)
                     self.load_tasks()
     
     def delete_task(self):
@@ -600,3 +622,36 @@ class MainWindow(QMainWindow):
         
         # 重新加载任务
         self.load_tasks()
+    
+    def on_position_changed(self, x1, y1, x2, y2):
+        """任务清单位置变化处理"""
+        # 保存到设置
+        self.settings.setValue("task_position", [x1, y1, x2, y2])
+        
+        # 更新壁纸管理器
+        self.wallpaper_manager.set_task_area(x1, y1, x2, y2)
+        
+        # 自动刷新壁纸
+        self.statusBar().showMessage("正在更新任务位置...", 1000)
+        
+        # 使用延迟刷新，避免拖动时频繁更新
+        if hasattr(self, "_refresh_timer"):
+            self._refresh_timer.stop()
+        else:
+            from PyQt6.QtCore import QTimer
+            self._refresh_timer = QTimer()
+            self._refresh_timer.setSingleShot(True)
+            self._refresh_timer.timeout.connect(self.refresh_wallpaper)
+        
+        self._refresh_timer.start(500)  # 500毫秒后刷新壁纸
+    
+    def open_wallpaper_settings(self):
+        """打开壁纸设置窗口"""
+        dialog = WallpaperSettingsDialog(self.wallpaper_manager, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 更新界面上的字体大小滑块（如果有）
+            if hasattr(self, 'font_slider'):
+                self.font_slider.setValue(self.settings.value("font_size", 24, type=int))
+            
+            # 显示状态消息
+            self.statusBar().showMessage("壁纸设置已更新", 3000)

@@ -27,6 +27,9 @@ class WallpaperManager:
         # 字体设置 - 固定使用微软雅黑
         self.font_size = 24  # 默认字体大小
         
+        # 任务区域位置 (相对坐标 0-1)
+        self.task_area_rel = [0.5, 0.15, 0.95, 0.95]  # 默认位置
+        
         # 创建Markdown渲染器
         self.md_renderer = MarkdownRenderer()
         
@@ -36,6 +39,10 @@ class WallpaperManager:
     def set_font_size(self, size):
         """设置字体大小"""
         self.font_size = size
+    
+    def set_task_area(self, x1, y1, x2, y2):
+        """设置任务区域位置 (相对坐标 0-1)"""
+        self.task_area_rel = [x1, y1, x2, y2]
     
     def _get_current_wallpaper(self):
         """获取当前壁纸路径"""
@@ -85,11 +92,15 @@ class WallpaperManager:
             # 创建绘图对象
             draw = ImageDraw.Draw(img)
             
-            # 绘制任务区域背景 (更宽的半透明区域)
+            # 使用相对坐标计算任务区域
             width, height = img.size
-            # 修改任务区域：上方预留更多空间，底部接触屏幕
-            top_margin = int(height * 0.15)  # 顶部预留15%的屏幕空间
-            task_area = (int(width * 0.5), top_margin, width - 50, height - 20)  # 底部接近屏幕边缘
+            x1 = int(self.task_area_rel[0] * width)
+            y1 = int(self.task_area_rel[1] * height)
+            x2 = int(self.task_area_rel[2] * width)
+            y2 = int(self.task_area_rel[3] * height)
+            task_area = (x1, y1, x2, y2)
+            
+            # 绘制任务区域背景 (更宽的半透明区域)
             overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
             overlay_draw = ImageDraw.Draw(overlay)
             
@@ -154,6 +165,25 @@ class WallpaperManager:
             # 处理任务列表 - 不再显示任务状态图标（移除方框）
             for task in tasks:
                 try:
+                    # 绘制任务标题
+                    title = task.get("title", "").strip()
+                    if not title:
+                        # 如果没有标题，使用内容的第一行
+                        title = task["content"].split('\n')[0]
+                        if len(title) > 50:
+                            title = title[:47] + "..."
+                    
+                    # 使用加粗字体渲染标题
+                    draw.text(
+                        (task_area[0] + 30, y_pos), 
+                        title, 
+                        fill=(220, 220, 255), 
+                        font=title_font
+                    )
+                    
+                    # 更新Y位置，为内容留出空间
+                    y_pos += title_font.getbbox(title)[3] + 10
+                    
                     # 使用Markdown渲染器渲染任务内容
                     md_width = task_area[2] - task_area[0] - 50  # 不再为状态图标留空间
                     rendered_pixmap = self.md_renderer.render_markdown(
