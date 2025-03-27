@@ -1,7 +1,9 @@
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                            QLabel, QSlider, QGroupBox, QComboBox)
+                            QLabel, QSlider, QGroupBox, QComboBox, QLineEdit, QFileDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QIcon
+
+import os
 
 from wallpaper_preview import WallpaperPreview
 
@@ -84,6 +86,36 @@ class WallpaperSettingsDialog(QDialog):
         
         layout.addWidget(font_group)
         
+        # 添加Mermaid图表设置区域
+        mermaid_group = QGroupBox("Mermaid图表设置")
+        mermaid_layout = QVBoxLayout(mermaid_group)
+
+        # 添加Chrome路径设置
+        chrome_layout = QHBoxLayout()
+        chrome_layout.addWidget(QLabel("Chrome浏览器路径:"))
+
+        self.chrome_path_edit = QLineEdit()
+        settings = QSettings("WallpaperTasks", "Application")
+        chrome_path = settings.value("chrome_path", "")
+        self.chrome_path_edit.setText(chrome_path)
+        self.chrome_path_edit.setReadOnly(True)
+        chrome_layout.addWidget(self.chrome_path_edit, 1)
+
+        self.browse_chrome_button = QPushButton("浏览...")
+        self.browse_chrome_button.clicked.connect(self.browse_chrome_path)
+        chrome_layout.addWidget(self.browse_chrome_button)
+
+        mermaid_layout.addLayout(chrome_layout)
+
+        # 添加说明文本
+        info_label = QLabel("Mermaid图表渲染需要Chrome或Edge浏览器。设置此路径可确保正确渲染图表，"
+                          "但不会影响程序的其他功能。")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-size: 12px;")
+        mermaid_layout.addWidget(info_label)
+
+        layout.addWidget(mermaid_group)
+        
         # 按钮区域
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -135,3 +167,27 @@ class WallpaperSettingsDialog(QDialog):
         
         # 关闭对话框
         self.accept()
+    
+    def browse_chrome_path(self):
+        """浏览并设置Chrome浏览器路径"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择Chrome或Edge浏览器", "", "浏览器 (*.exe)"
+        )
+        if path and os.path.exists(path):
+            self.chrome_path_edit.setText(path)
+            settings = QSettings("WallpaperTasks", "Application")
+            settings.setValue("chrome_path", path)
+            
+            # 通知渲染器chrome路径已更改
+            if hasattr(self.wallpaper_manager, 'md_renderer') and \
+               hasattr(self.wallpaper_manager.md_renderer, 'mermaid_renderer'):
+                renderer = self.wallpaper_manager.md_renderer.mermaid_renderer
+                renderer.chrome_path = path
+                renderer.browser = None  # 重置浏览器实例
+                if hasattr(renderer, '_browser_failed'):
+                    delattr(renderer, '_browser_failed')
+                if hasattr(renderer, '_shown_chrome_prompt'):
+                    delattr(renderer, '_shown_chrome_prompt')
+            
+            QMessageBox.information(self, "设置已保存", 
+                                  "Chrome路径已更新。下次渲染Mermaid图表时将使用新路径。")

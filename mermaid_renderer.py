@@ -3,14 +3,9 @@ import asyncio
 import tempfile
 import re
 from pyppeteer import launch
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QTextBrowser, QApplication, QGraphicsOpacityEffect
-from PyQt6.QtCore import QSize, Qt, QSizeF, QMarginsF
-from PyQt6.QtGui import QPainter, QColor, QPixmap, QTextDocument, QPageSize, QFont
-import markdown
-import sys
-import re
-# from mermaid_renderer import MermaidRenderer
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import Qt, QRect, QSettings, QEventLoop
+from PyQt6.QtWidgets import QMessageBox, QFileDialog, QApplication
 
 class MermaidRenderer:
     """Mermaid图表渲染器，使用pyppeteer/puppeteer将Mermaid语法转换为图像"""
@@ -20,17 +15,66 @@ class MermaidRenderer:
         os.makedirs(self.temp_dir, exist_ok=True)
         self.browser = None
         
+        # 尝试获取Chrome路径
+        self.chrome_path = self._find_chrome()
+        if self.chrome_path:
+            print(f"Chrome路径自动检测成功: {self.chrome_path}")
+        else:
+            print("未检测到Chrome路径，将在需要时提示用户")
+    
+    def _find_chrome(self):
+        """自动查找Chrome浏览器路径"""
+        # 首先检查是否有已保存的路径
+        settings = QSettings("WallpaperTasks", "Application")
+        saved_path = settings.value("chrome_path", "")
+        if saved_path and os.path.exists(saved_path):
+            return saved_path
+        
+        # 常见的Chrome安装路径
+        possible_paths = [
+            # 64位 Chrome
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            # 32位 Chrome
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            # 用户安装的Chrome
+            os.path.join(os.environ['LOCALAPPDATA'], r"Google\Chrome\Application\chrome.exe"),
+            # Edge 浏览器 (也基于Chromium)
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        
+        # 检查可能的路径
+        for path in possible_paths:
+            if os.path.exists(path):
+                # 保存找到的路径
+                settings.setValue("chrome_path", path)
+                return path
+        
+        return None
+        
     async def _get_browser(self):
         """懒加载浏览器实例"""
         if self.browser is None:
-            chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"  # 根据实际情况修改路径
-            self.browser = await launch(
-                headless=True,
-                executablePath=chrome_path,
-                args=['--no-sandbox', '--disable-setuid-sandbox']
-            )
+            try:
+                # 如果有Chrome路径，使用它
+                if hasattr(self, 'chrome_path') and self.chrome_path and os.path.exists(self.chrome_path):
+                    self.browser = await launch(
+                        headless=True,
+                        executablePath=self.chrome_path,
+                        args=['--no-sandbox', '--disable-setuid-sandbox']
+                    )
+                else:
+                    # 否则尝试默认路径(通常会失败)
+                    self.browser = await launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-setuid-sandbox']
+                    )
+            except Exception as e:
+                print(f"启动浏览器失败: {e}")
+                self._browser_failed = True
+                raise
         return self.browser
-        
+    
     async def render_mermaid_to_png(self, mermaid_code, output_path):
         """将Mermaid代码渲染为PNG图像"""
         browser = await self._get_browser()
@@ -107,11 +151,91 @@ class MermaidRenderer:
         if os.path.exists(output_path):
             return QPixmap(output_path)
         
-        # 否则渲染并返回
-        asyncio.get_event_loop().run_until_complete(
-            self.render_mermaid_to_png(mermaid_code, output_path)
-        )
-        return QPixmap(output_path)
+        try:
+            # 尝试渲染
+            asyncio.get_event_loop().run_until_complete(
+                self.render_mermaid_to_png(mermaid_code, output_path)
+            )
+            return QPixmap(output_path)
+        except Exception as e:
+            print(f"Mermaid渲染错误: {e}")
+            
+            # 只在第一次错误时提示用户
+            if not hasattr(self, '_shown_chrome_prompt'):
+                self._shown_chrome_prompt = True
+                
+                # 创建事件循环以便在异步环境中显示对话框
+                loop = QEventLoop()
+                chrome_selected = [False]
+                
+                # 显示对话框的函数
+                def show_chrome_dialog():
+                    msg = QMessageBox()
+                    msg.setIcon(QMessageBox.Icon.Warning)
+                    msg.setWindowTitle("Mermaid图表渲染失败")
+                    msg.setText("无法启动浏览器来渲染Mermaid图表")
+                    msg.setInformativeText("需要手动选择Chrome或Edge浏览器的位置\n\n"
+                                        "这只影响Mermaid图表的渲染，其他功能不受影响。")
+                    msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                    result = msg.exec()
+                    
+                    if result == QMessageBox.StandardButton.Yes:
+                        path, _ = QFileDialog.getOpenFileName(
+                            None, "选择Chrome或Edge浏览器", "", 
+                            "浏览器 (*.exe)"
+                        )
+                        
+                        if path and os.path.exists(path):
+                            # 保存用户选择的路径
+                            settings = QSettings("WallpaperTasks", "Application")
+                            settings.setValue("chrome_path", path)
+                            self.chrome_path = path
+                            self.browser = None  # 重置以便下次使用新路径
+                            chrome_selected[0] = True
+                    
+                    loop.quit()
+                
+                # 在主线程中显示对话框
+                QApplication.instance().invokeMethod(show_chrome_dialog, Qt.ConnectionType.QueuedConnection)
+                
+                # 等待对话框完成
+                loop.exec()
+                
+                # 如果用户选择了新的Chrome路径，重试渲染
+                if chrome_selected[0]:
+                    try:
+                        asyncio.get_event_loop().run_until_complete(
+                            self.render_mermaid_to_png(mermaid_code, output_path)
+                        )
+                        return QPixmap(output_path)
+                    except Exception as retry_e:
+                        print(f"重试渲染仍然失败: {retry_e}")
+            
+            # 返回错误图像
+            return self._create_error_image("无法渲染Mermaid图表")
+    
+    def _create_error_image(self, message):
+        """创建错误提示图像"""
+        pixmap = QPixmap(400, 100)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # 绘制错误提示背景
+        painter.setBrush(QColor(255, 0, 0, 40))
+        painter.setPen(QColor(255, 0, 0, 160))
+        painter.drawRect(0, 0, 399, 99)
+        
+        # 绘制错误消息
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont("Microsoft YaHei", 10)
+        painter.setFont(font)
+        painter.drawText(QRect(10, 10, 380, 80), Qt.AlignmentFlag.AlignCenter, message)
+        
+        painter.end()
+        return pixmap
     
     @staticmethod
     def extract_mermaid_blocks(md_text):
