@@ -1,26 +1,134 @@
 import os
-import sys
+import asyncio
+import tempfile
+import re
+from pyppeteer import launch
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import QTextBrowser, QApplication, QGraphicsOpacityEffect
+from PyQt6.QtCore import QSize, Qt, QSizeF, QMarginsF
+from PyQt6.QtGui import QPainter, QColor, QPixmap, QTextDocument, QPageSize, QFont
 import markdown
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter, QPixmap, QTextDocument, QFont
+import sys
+import re
+# from mermaid_renderer import MermaidRenderer
 
-# 尝试导入MermaidRenderer
-MERMAID_SUPPORT = False
-try:
-    # 确保当前目录在搜索路径中
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir not in sys.path:
-        sys.path.append(current_dir)
+class MermaidRenderer:
+    """Mermaid图表渲染器，使用pyppeteer/puppeteer将Mermaid语法转换为图像"""
     
-    # 尝试导入
-    from mermaid_renderer import MermaidRenderer
-    MERMAID_SUPPORT = True
-    print("Mermaid渲染器导入成功")
-except ImportError as e:
-    print(f"导入MermaidRenderer失败: {e}")
-    MERMAID_SUPPORT = False
-    print("未能导入MermaidRenderer，Mermaid图表将不可用")
+    def __init__(self):
+        self.temp_dir = os.path.join(tempfile.gettempdir(), "wallpaper_tasks_mermaid")
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.browser = None
+        
+    async def _get_browser(self):
+        """懒加载浏览器实例"""
+        if self.browser is None:
+            chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"  # 根据实际情况修改路径
+            self.browser = await launch(
+                headless=True,
+                executablePath=chrome_path,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+        return self.browser
+        
+    async def render_mermaid_to_png(self, mermaid_code, output_path):
+        """将Mermaid代码渲染为PNG图像"""
+        browser = await self._get_browser()
+        page = await browser.newPage()
+        
+        # 使用Mermaid在线渲染HTML
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+            <script>
+                mermaid.initialize({{
+                    startOnLoad: true,
+                    theme: 'dark',
+                    securityLevel: 'loose',
+                    fontFamily: 'Microsoft YaHei',
+                    background: 'transparent'
+                }});
+            </script>
+            <style>
+                body, html {{
+                    margin: 0;
+                    padding: 0;
+                    background-color: transparent;
+                }}
+                .mermaid {{
+                    color: white;
+                    background-color: transparent;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="mermaid">
+                {mermaid_code}
+            </div>
+        </body>
+        </html>
+        """
+        
+        # 写入临时HTML文件
+        html_path = os.path.join(self.temp_dir, "mermaid.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+            
+        # 打开HTML文件并等待Mermaid渲染完成
+        await page.goto(f"file://{html_path}")
+        await page.waitForSelector(".mermaid svg")
+        
+        # 找到SVG元素并截图
+        svg_element = await page.querySelector(".mermaid svg")
+        await svg_element.screenshot({"path": output_path, "omitBackground": True})
+        
+        await page.close()
+        return output_path
+    
+    def close(self):
+        """关闭浏览器实例"""
+        async def _close():
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+        
+        asyncio.get_event_loop().run_until_complete(_close())
+    
+    def render_mermaid(self, mermaid_code):
+        """渲染Mermaid代码为QPixmap"""
+        # 创建唯一的输出路径
+        output_path = os.path.join(self.temp_dir, f"mermaid_{hash(mermaid_code)}.png")
+        
+        # 如果已缓存，直接返回
+        if os.path.exists(output_path):
+            return QPixmap(output_path)
+        
+        # 否则渲染并返回
+        asyncio.get_event_loop().run_until_complete(
+            self.render_mermaid_to_png(mermaid_code, output_path)
+        )
+        return QPixmap(output_path)
+    
+    @staticmethod
+    def extract_mermaid_blocks(md_text):
+        """从Markdown文本中提取所有Mermaid代码块"""
+        pattern = r"```mermaid\s*([\s\S]*?)\s*```"
+        return re.findall(pattern, md_text)
+    
+    @staticmethod
+    def replace_mermaid_blocks(md_text, replacements):
+        """替换Markdown文本中的Mermaid代码块为占位符"""
+        pattern = r"```mermaid\s*([\s\S]*?)\s*```"
+        result = md_text
+        for i, match in enumerate(re.finditer(pattern, md_text)):
+            if i < len(replacements):
+                placeholder = f"!![MERMAID_DIAGRAM_{i}]!!"
+                result = result.replace(match.group(0), placeholder)
+        return result
 
 class MarkdownRenderer:
     """Markdown渲染器，将Markdown文本渲染为图像"""
@@ -36,18 +144,10 @@ class MarkdownRenderer:
         self.document = QTextDocument()
         self.document.setDocumentMargin(0)  # 移除边距
         
-        # 初始化Mermaid渲染器
-        if (MERMAID_SUPPORT):
-            try:
-                self.mermaid_renderer = MermaidRenderer()
-                print("Mermaid渲染器初始化成功")
-            except Exception as e:
-                print(f"Mermaid渲染器初始化失败: {e}")
-                self.mermaid_renderer = None
-        else:
-            self.mermaid_renderer = None
+        # 创建Mermaid渲染器
+        self.mermaid_renderer = MermaidRenderer()
         
-        # 自定义CSS样式
+        # 自定义CSS样式 - 增加删除线支持
         self.css_style = """
             <style>
                 * {
@@ -59,7 +159,7 @@ class MarkdownRenderer:
                 body {
                     color: white;
                     padding: 10px;
-                    padding-right: 15px;
+                    padding-right: 15px;  /* 避免文本太靠近右边缘 */
                 }
                 h1, h2, h3, h4, h5, h6 {
                     color: #e0e0ff;
@@ -72,55 +172,14 @@ class MarkdownRenderer:
                 h3 { font-size: 1.2em; }
                 strong { color: #ffffb0; }
                 em { color: #b0ffff; }
-                
-                /* 增强列表样式 */
+                del { color: #ff9090; text-decoration: line-through; }
                 ul, ol {
                     margin-left: 0.8em;
-                    padding-left: 1.5em;
-                    margin-bottom: 0.8em;
+                    padding-left: 0.8em;
                 }
-                
-                /* 有序列表样式 */
-                ol {
-                    list-style-type: decimal;
-                    list-style-position: outside;
-                }
-                
-                /* 嵌套的有序列表使用字母 */
-                ol ol {
-                    list-style-type: lower-alpha;
-                    margin-left: 0.5em;
-                }
-                
-                /* 三级嵌套用小写罗马数字 */
-                ol ol ol {
-                    list-style-type: lower-roman;
-                }
-                
-                /* 无序列表样式 */
-                ul {
-                    list-style-type: disc;
-                }
-                
-                ul ul {
-                    list-style-type: circle;
-                }
-                
-                ul ul ul {
-                    list-style-type: square;
-                }
-                
-                /* 列表项通用样式 */
                 li {
-                    margin: 0.3em 0;
-                    padding-left: 0.2em;
+                    margin: 0.2em 0;
                 }
-                
-                /* 嵌套列表项增加缩进 */
-                li li {
-                    margin-left: 0.5em;
-                }
-                
                 code {
                     background-color: rgba(80, 80, 80, 0.3);
                     padding: 0.1em 0.3em;
@@ -147,7 +206,7 @@ class MarkdownRenderer:
                     height: 0px;
                 }
                 /* 添加删除线支持 */
-                del, s {
+                .del, del, s {
                     text-decoration: line-through;
                     color: #ff9090;
                 }
@@ -164,71 +223,24 @@ class MarkdownRenderer:
         # 如果任务已完成，使用暗色
         text_color = "#aaaaaa" if completed else "white"
         
-        import re
-        # 替换删除线语法
-        md_text = re.sub(r'~~(.*?)~~', r'<del>\1</del>', md_text)
+        # 处理Mermaid图表
+        mermaid_blocks = self.mermaid_renderer.extract_mermaid_blocks(md_text)
+        if mermaid_blocks:
+            # 处理包含Mermaid的Markdown
+            return self._render_with_mermaid(md_text, mermaid_blocks, width, font_size, text_color, completed)
         
-        # 预处理任务列表语法
-        md_text = re.sub(r'\[ \]', r'&#9744;', md_text)
-        md_text = re.sub(r'\[x\]', r'&#9745;', md_text, flags=re.IGNORECASE)
-        
-        # 处理嵌套列表和字母列表
-        # 1. 确保所有缩进的列表项保留缩进
-        lines = md_text.split('\n')
-        for i in range(len(lines)):
-            # 处理缩进的有序子列表
-            if re.match(r'\s+\d+\.\s', lines[i]):
-                indent = len(re.match(r'(\s+)', lines[i]).group(1))
-                lines[i] = '    ' * (indent // 4) + lines[i].strip()
-            
-            # 处理字母序号列表 (a. b. c.)
-            if re.match(r'\s*[a-z]\.\s', lines[i], re.IGNORECASE):
-                # 将字母列表转换为HTML列表项
-                letter = re.match(r'\s*([a-z])\.\s', lines[i], re.IGNORECASE).group(1)
-                content = re.sub(r'\s*[a-z]\.\s', '', lines[i], flags=re.IGNORECASE)
-                # 修复方式 1：使用双引号包裹整个字符串
-                lines[i] = f"<li style=\"list-style-type: lower-alpha;\">{content}</li>"
-                # 或修复方式 2：使用转义字符
-                # lines[i] = f"<li style=\'list-style-type: lower-alpha;\'>{content}</li>"
-        
-        md_text = '\n'.join(lines)
-        
-        # 若包含Mermaid则单独处理
-        mermaid_blocks = None
-        if self.mermaid_renderer:
-            try:
-                mermaid_blocks = self.mermaid_renderer.extract_mermaid_blocks(md_text)
-                if (mermaid_blocks):
-                    print(f"检测到{len(mermaid_blocks)}个Mermaid图表")
-                    return self._render_with_mermaid(md_text, mermaid_blocks, width, font_size, text_color, completed)
-            except Exception as e:
-                print(f"提取Mermaid代码块失败: {e}")
-        
-        # 使用extra扩展转换Markdown为HTML
+        # 转换Markdown为HTML - 添加扩展支持
         html = markdown.markdown(md_text, extensions=[
-            'tables', 'fenced_code', 'extra', 'nl2br', 'sane_lists'
+            'tables', 'fenced_code', 'extra', 'sane_lists', 'nl2br'
         ])
         
-        # 修正嵌套列表和字母列表的CSS
+        # 包装HTML并应用样式，确保正确的字体比例
         html = f"""
         <html>
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 {self.css_style}
-                <style>
-                    /* 字母序号列表样式 */
-                    ol ol {{
-                        list-style-type: lower-alpha;
-                    }}
-                    /* 墛强嵌套列表样式 */
-                    li {{
-                        margin: 0.3em 0;
-                    }}
-                    li li {{
-                        margin-left: 1em;
-                    }}
-                </style>
             </head>
             <body style="color: {text_color};">
                 {html}
@@ -238,23 +250,33 @@ class MarkdownRenderer:
         
         # 设置文档和字体
         self.document.setHtml(html)
+        
+        # 设置正确的字体和字体大小
         font = QFont("Microsoft YaHei", font_size)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         self.document.setDefaultFont(font)
-        self.document.setTextWidth(width - 20)
         
+        # 设置文档大小，防止挤压
+        self.document.setTextWidth(width - 20)  # 减去一些内边距，防止文本挤压
+        
+        # 计算实际高度
         doc_height = self.document.size().height()
-        max_height = 500
+        
+        # 控制最大高度
+        max_height = 500  # 防止内容过长
         actual_height = min(int(doc_height), max_height)
         
+        # 创建透明背景的图像
         pixmap = QPixmap(width, actual_height)
         pixmap.fill(Qt.GlobalColor.transparent)
         
+        # 设置渲染选项 - 确保正确的DPI和无滚动条
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
+        # 直接绘制文档内容，而不是渲染整个控件
         self.document.drawContents(painter)
         painter.end()
         
@@ -262,15 +284,10 @@ class MarkdownRenderer:
     
     def _render_with_mermaid(self, md_text, mermaid_blocks, width, font_size, text_color, completed):
         """处理包含Mermaid图表的Markdown"""
-        if not self.mermaid_renderer:
-            print("Mermaid渲染器不可用，返回普通渲染")
-            return self.render_markdown(md_text, width, font_size, completed)
-            
         # 渲染所有Mermaid块
         mermaid_images = []
         for block in mermaid_blocks:
             try:
-                print(f"渲染Mermaid代码块: {block[:30]}...")
                 pixmap = self.mermaid_renderer.render_mermaid(block)
                 # 等比例缩放图表以适应宽度
                 if pixmap.width() > width - 40:  # 留出边距
@@ -291,24 +308,27 @@ class MarkdownRenderer:
         
         # 渲染不含Mermaid的Markdown
         html = markdown.markdown(md_with_placeholders, extensions=[
-            'tables', 'fenced_code', 'extra', 'nl2br'
+            'tables', 'fenced_code', 'extra', 'sane_lists', 'nl2br'
         ])
         
         # 将Mermaid占位符替换为图像HTML标签
         for i, pixmap in enumerate(mermaid_images):
-            if (pixmap):
+            if pixmap:
                 # 保存临时图像文件
-                img_path = os.path.join(self.mermaid_renderer.temp_dir, f"mermaid_temp_{i}.png")
+                img_path = f"mermaid_temp_{i}.png"
                 pixmap.save(img_path)
-                # 替换占位符为图像标签 - 确保HTML字符串格式正确
+                # 替换占位符为图像标签
                 html = html.replace(
                     f"!![MERMAID_DIAGRAM_{i}]!!", 
                     f'<div class="mermaid-container"><img src="{img_path}" alt="Mermaid Diagram"></div>'
                 )
             else:
-                # 替换为错误消息 - 确保字符串格式正确，避免Python误解析样式属性
-                error_html = '<div style="color:#ff6666;text-align:center;padding:10px;border:1px solid #ff6666;border-radius:5px;margin:10px 0;">无法渲染Mermaid图表</div>'
-                html = html.replace(f"!![MERMAID_DIAGRAM_{i}]!!", error_html)
+                # 替换为错误消息
+                html = html.replace(
+                    f"!![MERMAID_DIAGRAM_{i}]!!", 
+                    '<div style="color:#ff6666;text-align:center;padding:10px;border:1px solid #ff6666;border-radius:5px;margin:10px 0;">'
+                    '无法渲染Mermaid图表</div>'
+                )
         
         # 包装HTML并应用样式
         html = f"""
@@ -339,7 +359,7 @@ class MarkdownRenderer:
         doc_height = self.document.size().height()
         
         # 控制最大高度，但为Mermaid图表留出更多空间
-        max_height = 600  # 墛加最大高度以容纳图表
+        max_height = 600  # 增加最大高度以容纳图表
         actual_height = min(int(doc_height), max_height)
         
         # 创建透明背景的图像
@@ -356,13 +376,16 @@ class MarkdownRenderer:
         self.document.drawContents(painter)
         painter.end()
         
+        # 清理临时文件
+        for i in range(len(mermaid_images)):
+            try:
+                os.remove(f"mermaid_temp_{i}.png")
+            except:
+                pass
+        
         return pixmap
     
     def cleanup(self):
         """清理资源"""
-        if hasattr(self, 'mermaid_renderer') and self.mermaid_renderer:
-            try:
-                self.mermaid_renderer.close()
-                print("已关闭Mermaid渲染器")
-            except Exception as e:
-                print(f"关闭Mermaid渲染器出错: {e}")
+        if hasattr(self, 'mermaid_renderer'):
+            self.mermaid_renderer.close()

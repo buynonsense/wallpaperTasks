@@ -388,6 +388,10 @@ class MainWindow(QMainWindow):
         # 恢复原壁纸
         self.wallpaper_manager.restore_original_wallpaper()
         
+        # 清理Markdown渲染器
+        if hasattr(self.wallpaper_manager, 'md_renderer'):
+            self.wallpaper_manager.md_renderer.cleanup()
+        
         # 隐藏托盘图标
         self.tray_icon.hide()
         

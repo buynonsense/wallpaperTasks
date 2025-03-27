@@ -20,6 +20,16 @@ class WallpaperManager:
         # 保存原始壁纸路径
         self.original_wallpaper = self._get_current_wallpaper()
         
+        # 在此加载原图并保存到内存中
+        if self.original_wallpaper and os.path.exists(self.original_wallpaper):
+            try:
+                self.original_image = Image.open(self.original_wallpaper).copy()
+            except Exception as e:
+                print(f"加载原始壁纸图片失败: {e}")
+                self.original_image = Image.new('RGB', (1920, 1080), (30, 30, 40))
+        else:
+            self.original_image = Image.new('RGB', (1920, 1080), (30, 30, 40))
+        
         # 创建临时文件目录
         self.temp_dir = os.path.join(tempfile.gettempdir(), "wallpaper_tasks")
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -80,19 +90,15 @@ class WallpaperManager:
             return False
     
     def refresh_wallpaper(self):
-        """刷新壁纸，添加任务清单"""
         try:
-            # 始终从原始壁纸开始，而不是当前壁纸
+            # 每次刷新时都重新加载原始壁纸，保证基础图像干净
             if self.original_wallpaper and os.path.exists(self.original_wallpaper):
-                img = Image.open(self.original_wallpaper)
+                original_image = Image.open(self.original_wallpaper).copy()
             else:
-                print("无法获取原始壁纸，使用纯色背景")
-                img = Image.new('RGB', (1920, 1080), (30, 30, 40))
+                original_image = Image.new('RGB', (1920, 1080), (30, 30, 40))
+            img = original_image.copy()
             
-            # 创建绘图对象
-            draw = ImageDraw.Draw(img)
-            
-            # 使用相对坐标计算任务区域
+            # 计算任务区域
             width, height = img.size
             x1 = int(self.task_area_rel[0] * width)
             y1 = int(self.task_area_rel[1] * height)
@@ -100,40 +106,37 @@ class WallpaperManager:
             y2 = int(self.task_area_rel[3] * height)
             task_area = (x1, y1, x2, y2)
             
-            # 绘制任务区域背景 (更宽的半透明区域)
+            # 绘制半透明任务区域背景
+            from PIL import ImageDraw  # 确保导入ImageDraw
             overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
             overlay_draw = ImageDraw.Draw(overlay)
-            
-            # 使用圆角矩形背景，更美观
             radius = 20
-            # 绘制圆角矩形 - 主体部分
             overlay_draw.rectangle(
                 [task_area[0], task_area[1] + radius, task_area[2], task_area[3] - radius],
-                fill=(30, 30, 40, 160)  # 降低不透明度，提高可读性
+                fill=(30, 30, 40, 160)
             )
-            # 绘制顶部圆角部分
             overlay_draw.rectangle(
                 [task_area[0] + radius, task_area[1], task_area[2] - radius, task_area[1] + radius],
                 fill=(30, 30, 40, 160)
             )
-            # 绘制底部圆角部分
             overlay_draw.rectangle(
                 [task_area[0] + radius, task_area[3] - radius, task_area[2] - radius, task_area[3]],
                 fill=(30, 30, 40, 160)
             )
-            # 绘制四个圆角
             overlay_draw.ellipse([task_area[0], task_area[1], task_area[0] + radius * 2, task_area[1] + radius * 2],
-                               fill=(30, 30, 40, 160))
+                                   fill=(30, 30, 40, 160))
             overlay_draw.ellipse([task_area[2] - radius * 2, task_area[1], task_area[2], task_area[1] + radius * 2],
-                               fill=(30, 30, 40, 160))
+                                   fill=(30, 30, 40, 160))
             overlay_draw.ellipse([task_area[0], task_area[3] - radius * 2, task_area[0] + radius * 2, task_area[3]],
-                               fill=(30, 30, 40, 160))
+                                   fill=(30, 30, 40, 160))
             overlay_draw.ellipse([task_area[2] - radius * 2, task_area[3] - radius * 2, task_area[2], task_area[3]],
-                               fill=(30, 30, 40, 160))
+                                   fill=(30, 30, 40, 160))
             
-            # 合并overlay到主图像
             img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
-            draw = ImageDraw.Draw(img)  # 重新创建绘图对象
+            
+            # 后续绘制任务内容代码保持不变...
+            # 创建绘图对象
+            draw = ImageDraw.Draw(img)
             
             # 加载字体
             try:
@@ -218,7 +221,10 @@ class WallpaperManager:
                     y_pos += md_image.height + 25  # 任务间距
                     
                 except Exception as e:
+                    import traceback
                     print(f"渲染Markdown失败，回退到纯文本: {e}")
+                    print("详细错误信息:")
+                    traceback.print_exc()  # 打印完整的堆栈跟踪
                     # 回退到纯文本渲染
                     text = task["content"]
                     color = (180, 180, 180) if task["is_completed"] else (255, 255, 255)
@@ -243,11 +249,12 @@ class WallpaperManager:
                     text_x = task_area[0] + 30  # 从30像素开始，而不是70
                     line_height = int(self.font_size * 1.5)
                     for i, line in enumerate(lines[:3]):  # 限制最多3行
-                        draw.text((text_x, y_pos + i * line_height), line, fill(color), font(task_font))
+                        # 修改此处，直接传递color和font作为参数
+                        draw.text((text_x, y_pos + i * line_height), line, fill=color, font=task_font)
                     
                     # 如果有更多行但未显示，添加省略号
                     if len(lines) > 3:
-                        draw.text((text_x, y_pos + 3 * line_height), "...", fill(color), font(task_font))
+                        draw.text((text_x, y_pos + 3 * line_height), "...", fill=color, font=task_font)
                     
                     # 更新下一个任务的Y位置
                     line_count = min(len(lines), 3) + (1 if len(lines) > 3 else 0)
