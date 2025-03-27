@@ -41,12 +41,16 @@ class TaskManager:
                 with open(self.data_path, 'r', encoding='utf-8') as f:
                     tasks = json.load(f)
                     
-                    # 兼容旧数据，添加标题字段
+                    # 兼容旧数据，添加标题字段和显示字段
                     for task in tasks:
                         if "title" not in task:
                             # 使用内容的第一行作为标题
                             first_line = task["content"].split('\n')[0]
                             task["title"] = first_line[:50]  # 限制标题长度
+                        
+                        # 添加显示在壁纸上的标记，默认为True
+                        if "show_on_wallpaper" not in task:
+                            task["show_on_wallpaper"] = True
                     
                     return tasks
             except Exception as e:
@@ -75,14 +79,15 @@ class TaskManager:
             "content": content,
             "is_completed": False,
             "created_at": datetime.now().isoformat(),
-            "completed_at": None
+            "completed_at": None,
+            "show_on_wallpaper": True  # 默认显示在壁纸上
         }
         self.tasks.append(task)
         self._save_tasks()
         self._notify_changed()
         return task
     
-    def update_task(self, task_id, title=None, content=None, is_completed=None):
+    def update_task(self, task_id, title=None, content=None, is_completed=None, show_on_wallpaper=None):
         """更新任务"""
         for task in self.tasks:
             if task["id"] == task_id:
@@ -93,6 +98,8 @@ class TaskManager:
                 if is_completed is not None:
                     task["is_completed"] = is_completed
                     task["completed_at"] = datetime.now().isoformat() if is_completed else None
+                if show_on_wallpaper is not None:
+                    task["show_on_wallpaper"] = show_on_wallpaper
                 self._save_tasks()
                 self._notify_changed()
                 return True
@@ -122,10 +129,31 @@ class TaskManager:
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    self.tasks = json.load(f)
+                    imported_tasks = json.load(f)
+                    
+                    # 创建任务ID映射，用于识别相同任务
+                    current_tasks_map = {task["id"]: task for task in self.tasks}
+                    
+                    # 处理导入的任务
+                    for task in imported_tasks:
+                        # 兼容旧数据，添加标题字段
+                        if "title" not in task:
+                            first_line = task["content"].split('\n')[0]
+                            task["title"] = first_line[:50]  # 限制标题长度
+                        
+                        # 如果是已存在的任务，保留其壁纸显示设置
+                        if task["id"] in current_tasks_map:
+                            task["show_on_wallpaper"] = current_tasks_map[task["id"]].get("show_on_wallpaper", True)
+                        # 对于新导入的任务，如果没有壁纸显示设置，则默认为True
+                        elif "show_on_wallpaper" not in task:
+                            task["show_on_wallpaper"] = True
+                    
+                    # 更新任务列表
+                    self.tasks = imported_tasks
                     self._save_tasks()
                     self._notify_changed()
-                return True
+                    return True
+                
             except Exception as e:
                 print(f"导入任务出错: {e}")
                 return False

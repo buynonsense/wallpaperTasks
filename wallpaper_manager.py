@@ -154,9 +154,10 @@ class WallpaperManager:
             title_x = task_area[0] + (task_area[2] - task_area[0] - title_width) // 2
             draw.text((title_x, task_area[1] + 20), title, fill=(255, 255, 255), font=title_font)
             
-            # 获取任务列表 - 只显示未完成的任务
+            # 获取任务列表 - 只显示标记为在壁纸上显示且未完成的任务
             all_tasks = self.task_manager.get_all_tasks()
-            tasks = [task for task in all_tasks if not task["is_completed"]]
+            tasks = [task for task in all_tasks 
+                     if not task["is_completed"] and task.get("show_on_wallpaper", True)]
             
             # 任务起始Y坐标
             y_pos = task_area[1] + 80

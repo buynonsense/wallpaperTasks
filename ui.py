@@ -235,6 +235,10 @@ class MainWindow(QMainWindow):
         self.complete_button = QPushButton("完成/未完成")
         self.complete_button.setIcon(QIcon.fromTheme("emblem-default", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)))
         
+        self.wallpaper_toggle_button = QPushButton("切换壁纸显示")
+        self.wallpaper_toggle_button.setIcon(QIcon.fromTheme("preferences-desktop-wallpaper", self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)))
+        task_buttons_layout.addWidget(self.wallpaper_toggle_button)
+
         task_buttons_layout.addWidget(self.add_button)
         task_buttons_layout.addWidget(self.edit_button)
         task_buttons_layout.addWidget(self.delete_button)
@@ -303,7 +307,8 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export_tasks)
         self.refresh_button.clicked.connect(self.refresh_wallpaper)
         self.restore_button.clicked.connect(self.restore_wallpaper)
-        
+        self.wallpaper_toggle_button.clicked.connect(self.toggle_selected_task_wallpaper)
+
         # 创建系统托盘
         self.setup_tray_icon()
         
@@ -415,7 +420,12 @@ class MainWindow(QMainWindow):
                 if len(display_text) > 50:
                     display_text = display_text[:47] + "..."
             
-            # 直接设置文本，移除前缀复选框
+            # 为显示在壁纸上的任务添加标记
+            show_on_wallpaper = task.get("show_on_wallpaper", True)
+            if show_on_wallpaper and not task["is_completed"]:
+                display_text = "🖼️ " + display_text  # 添加壁纸图标
+            
+            # 设置文本
             item.setText(display_text)
             
             # 存储完整任务数据
@@ -532,6 +542,12 @@ class MainWindow(QMainWindow):
             edit_action = context_menu.addAction("编辑")
             complete_action = context_menu.addAction(
                 "标记为未完成" if task["is_completed"] else "标记为完成")
+            
+            # 添加在壁纸上显示/隐藏的选项
+            show_on_wallpaper = task.get("show_on_wallpaper", True)
+            wallpaper_action = context_menu.addAction(
+                "从壁纸中隐藏" if show_on_wallpaper else "在壁纸中显示")
+            
             delete_action = context_menu.addAction("删除")
             
             action = context_menu.exec(self.task_list.mapToGlobal(position))
@@ -540,9 +556,29 @@ class MainWindow(QMainWindow):
                 self.edit_task()
             elif action == complete_action:
                 self.toggle_task_completion()
+            elif action == wallpaper_action:
+                self.toggle_task_wallpaper_visibility(task)
             elif action == delete_action:
                 self.delete_task()
+
+    def toggle_task_wallpaper_visibility(self, task):
+        """切换任务在壁纸上的显示状态"""
+        current_state = task.get("show_on_wallpaper", True)
+        self.task_manager.update_task(task["id"], show_on_wallpaper=not current_state)
+        
+        # 更新视觉提示
+        self.load_tasks()
+        
+        # 刷新壁纸
+        self.refresh_wallpaper()
     
+    def toggle_selected_task_wallpaper(self):
+        """切换选中任务在壁纸上的显示状态"""
+        current_item = self.task_list.currentItem()
+        if current_item:
+            task = current_item.data(Qt.ItemDataRole.UserRole)
+            self.toggle_task_wallpaper_visibility(task)
+
     def on_font_size_changed(self, value):
         """字体大小滑块数值变化处理"""
         self.font_size = value
