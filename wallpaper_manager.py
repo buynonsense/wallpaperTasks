@@ -20,8 +20,15 @@ class WallpaperManager:
         self.temp_dir = os.path.join(tempfile.gettempdir(), "wallpaper_tasks")
         os.makedirs(self.temp_dir, exist_ok=True)
         
+        # 字体设置 - 固定使用微软雅黑
+        self.font_size = 24  # 默认字体大小
+        
         # 监听任务变更
         self.task_manager.add_change_listener(self.refresh_wallpaper)
+    
+    def set_font_size(self, size):
+        """设置字体大小"""
+        self.font_size = size
     
     def _get_current_wallpaper(self):
         """获取当前壁纸路径"""
@@ -61,21 +68,21 @@ class WallpaperManager:
     def refresh_wallpaper(self):
         """刷新壁纸，添加任务列表"""
         try:
-            # 加载当前壁纸
-            current_wallpaper = self._get_current_wallpaper()
-            if not current_wallpaper or not os.path.exists(current_wallpaper):
-                print("无法获取当前壁纸，使用纯色背景")
-                img = Image.new('RGB', (1920, 1080), (30, 30, 40))
+            # 始终从原始壁纸开始，而不是当前壁纸
+            if self.original_wallpaper and os.path.exists(self.original_wallpaper):
+                img = Image.open(self.original_wallpaper)
             else:
-                img = Image.open(current_wallpaper)
+                print("无法获取原始壁纸，使用纯色背景")
+                img = Image.new('RGB', (1920, 1080), (30, 30, 40))
             
             # 创建绘图对象
             draw = ImageDraw.Draw(img)
             
             # 绘制任务区域背景 (更宽的半透明区域)
             width, height = img.size
-            # 任务区域占屏幕右侧40%，而不是之前的更小区域
-            task_area = (int(width * 0.5), 50, width - 50, height - 50)  # 进一步增加任务区域宽度
+            # 修改任务区域：上方预留更多空间，底部接触屏幕
+            top_margin = int(height * 0.15)  # 顶部预留15%的屏幕空间
+            task_area = (int(width * 0.5), top_margin, width - 50, height - 20)  # 底部接近屏幕边缘
             overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
             overlay_draw = ImageDraw.Draw(overlay)
             
@@ -108,23 +115,23 @@ class WallpaperManager:
             img = Image.alpha_composite(img, overlay)
             img = img.convert('RGB')  # 转回RGB用于保存
             
-            # 查找适合的字体并增大字号
+            # 查找微软雅黑字体
+            title_font_size = self.font_size + 14  # 标题字体比正文大一些
+            
             try:
-                # 尝试使用微软雅黑
-                title_font = ImageFont.truetype("msyh.ttc", 44) # 进一步放大标题字体
-                task_font = ImageFont.truetype("msyh.ttc", 30)  # 进一步放大任务字体
-                status_font = ImageFont.truetype("msyh.ttc", 32) # 进一步放大状态图标字体
-            except:
-                try:
-                    # 尝试使用Arial
-                    title_font = ImageFont.truetype("arial.ttf", 44)
-                    task_font = ImageFont.truetype("arial.ttf", 30)
-                    status_font = ImageFont.truetype("arial.ttf", 32)
-                except:
-                    # 使用默认字体
-                    title_font = ImageFont.load_default()
-                    task_font = ImageFont.load_default()
-                    status_font = ImageFont.load_default()
+                # 尝试加载微软雅黑字体
+                font_dir = os.path.join(os.environ['WINDIR'], 'Fonts')
+                font_path = os.path.join(font_dir, 'msyh.ttc')
+                
+                title_font = ImageFont.truetype(font_path, title_font_size)
+                task_font = ImageFont.truetype(font_path, self.font_size)
+                status_font = ImageFont.truetype(font_path, self.font_size + 2)
+            except Exception as e:
+                print(f"加载字体失败: {e}, 使用默认字体")
+                # 使用默认字体
+                title_font = ImageFont.load_default()
+                task_font = ImageFont.load_default()
+                status_font = ImageFont.load_default()
             
             # 绘制标题和彩色分隔线
             draw = ImageDraw.Draw(img)
@@ -187,10 +194,6 @@ class WallpaperManager:
                 if len(lines) > 3:
                     draw.text((text_x, y_pos + 3 * 36), "...", fill=color, font=task_font)
                 
-                # 移动到下一个任务位置
-                line_count = min(len(lines), 3)
-                y_pos += (line_count * 36) + 45  # 增加任务间距
-                
                 # 避免任务超出区域
                 if y_pos > task_area[3] - 40:
                     draw.text((task_area[0] + 70, y_pos), "更多任务...", fill=(255, 255, 255), font=task_font)
@@ -200,7 +203,7 @@ class WallpaperManager:
             if not tasks:
                 draw.text(
                     (task_area[0] + 70, y_pos), 
-                    '暂无任务，点击"添加任务"开始',  # 修复这里的引号问题，使用单引号包裹
+                    '暂无任务，点击"添加任务"开始',
                     fill=(200, 200, 200), 
                     font=task_font
                 )

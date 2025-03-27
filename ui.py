@@ -3,12 +3,14 @@ import os
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QListWidget, QListWidgetItem, QDialog, 
                             QTextEdit, QLabel, QFileDialog, QMessageBox, QMenu,
-                            QSystemTrayIcon, QApplication)
-from PyQt6.QtCore import Qt, QSize
+                            QSystemTrayIcon, QApplication, QSlider, QGroupBox, QStyle,
+                            QComboBox)
+from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QIcon, QAction
 
 from task_manager import TaskManager
 from wallpaper_manager import WallpaperManager
+from logo_generator import create_logo
 
 class MarkdownEditor(QDialog):
     """Markdown编辑对话框"""
@@ -59,121 +61,290 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("桌面壁纸任务清单")
-        self.resize(800, 600)  # 增大窗口尺寸
+        self.resize(800, 600)  # 更大的窗口尺寸
         
-        # 设置应用样式表
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f5f5f7;
-            }
-            QLabel {
-                font-size: 14px;
-                color: #333;
-                margin: 5px;
-            }
-            QListWidget {
-                background-color: white;
-                border-radius: 8px;
-                border: 1px solid #ddd;
-                padding: 5px;
-                font-size: 14px;
-            }
-            QListWidget::item {
-                border-bottom: 1px solid #eee;
-                padding: 8px;
-            }
-            QListWidget::item:selected {
-                background-color: #e0f0ff;
-                color: #333;
-            }
-            QPushButton {
-                background-color: #4a7bff;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-size: 14px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #3a6eff;
-            }
-            QPushButton:pressed {
-                background-color: #2a5eff;
-            }
-        """)
+        # 设置应用图标
+        app_icon = create_logo()
+        self.setWindowIcon(app_icon)
+        
+        # 加载设置
+        self.settings = QSettings("WallpaperTasks", "Application")
+        self.font_size = self.settings.value("font_size", 24, type=int)
         
         # 初始化管理器
         self.task_manager = TaskManager()
         self.wallpaper_manager = WallpaperManager(self.task_manager)
+        self.wallpaper_manager.set_font_size(self.font_size)
         
         # 初始刷新壁纸
         self.wallpaper_manager.refresh_wallpaper()
+        
+        # 设置整体样式 - 现代年轻化风格
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                background-color: white;
+                border: 1px solid #eaeaea;
+                border-radius: 8px;
+                margin-top: 14px;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 8px;
+                color: #333;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+                color: #444;
+            }
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #eaeaea;
+                padding: 8px 16px;
+                border-radius: 6px;
+                color: #555;
+                font-weight: 500;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QPushButton:hover {
+                background-color: #f0f7ff;
+                color: #2d8cf0;
+                border-color: #d4e8ff;
+            }
+            QPushButton:pressed {
+                background-color: #e0f0ff;
+                border-color: #2d8cf0;
+                color: #2d8cf0;
+            }
+            QListWidget {
+                background-color: white;
+                border: 1px solid #eaeaea;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 14px;
+                selection-background-color: #f0f7ff;
+            }
+            QLabel {
+                color: #333;
+                font-size: 14px;
+            }
+            QSlider::handle:horizontal {
+                background: #2d8cf0;
+                border: 1px solid #2d8cf0;
+                width: 16px;
+                height: 16px;
+                margin: -7px 0;
+                border-radius: 8px;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #e0e0e0;
+                margin: 0 4px;
+                border-radius: 3px;
+            }
+            QSlider::add-page:horizontal {
+                background: #e0e0e0;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #2d8cf0;
+                border-radius: 3px;
+            }
+            QStatusBar {
+                color: #666;
+                font-size: 13px;
+                padding: 4px 6px;
+            }
+        """)
         
         # 设置中心窗口
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         # 主布局
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(20, 20, 20, 20)  # 增加边距
-        layout.setSpacing(15)  # 增加间距
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
         
-        # 顶部信息
-        info_label = QLabel("程序已启动，您的任务将显示在桌面壁纸上")
-        info_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; padding: 10px;")
-        layout.addWidget(info_label)
+        # 顶部信息面板
+        info_panel = QGroupBox("任务壁纸")
+        info_layout = QVBoxLayout(info_panel)
+        
+        info_label = QLabel("在桌面壁纸上显示您的任务清单")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info_label.setStyleSheet("font-size: 16px; color: #333; margin: 8px 0; font-weight: bold;")
+        info_layout.addWidget(info_label)
+        
+        main_layout.addWidget(info_panel)
+        
+        # 任务列表面板
+        tasks_panel = QGroupBox("任务列表")
+        tasks_layout = QVBoxLayout(tasks_panel)
         
         # 任务列表
         self.task_list = QListWidget()
         self.task_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.task_list.customContextMenuRequested.connect(self.show_context_menu)
-        self.task_list.setStyleSheet("font-size: 15px;")  # 增大字体
-        self.task_list.setMinimumHeight(300)  # 设置最小高度
-        layout.addWidget(self.task_list)
+        self.task_list.setAlternatingRowColors(True)
+        self.task_list.setStyleSheet("""
+            QListWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid #f0f0f0;
+                font-size: 15px;
+            }
+            QListWidget::item:selected {
+                background-color: #f0f7ff;
+                color: #2d8cf0;
+                border-radius: 6px;
+            }
+            QListWidget::item:hover {
+                background-color: #fafbfc;
+            }
+            QListWidget::item:alternate {
+                background-color: #fcfcfc;
+            }
+        """)
+        tasks_layout.addWidget(self.task_list)
         
-        # 按钮区域 - 使用更好的布局
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)  # 按钮间距
+        # 任务操作按钮区
+        task_buttons_layout = QHBoxLayout()
         
+        # 添加任务按钮 - 蓝色
         self.add_button = QPushButton("添加任务")
+        self.add_button.setIcon(QIcon.fromTheme("list-add", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)))
+        self.add_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d8cf0; 
+                color: white; 
+                border-color: #2d8cf0;
+                font-weight: bold;
+                padding: 10px 16px;
+            }
+            QPushButton:hover {
+                background-color: #54a8ff;
+                border-color: #54a8ff;
+            }
+            QPushButton:pressed {
+                background-color: #2a80d8;
+                border-color: #2a80d8;
+            }
+        """)
+        
+        # 编辑任务保持默认样式，已有悬停和按下效果
         self.edit_button = QPushButton("编辑任务")
+        self.edit_button.setIcon(QIcon.fromTheme("document-edit", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)))
+        
+        # 删除任务按钮 - 红色
         self.delete_button = QPushButton("删除任务")
-        self.complete_button = QPushButton("标记完成/未完成")
+        self.delete_button.setIcon(QIcon.fromTheme("edit-delete", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton)))
+        self.delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f56c6c; 
+                color: white; 
+                border-color: #f56c6c;
+            }
+            QPushButton:hover {
+                background-color: #ff8585;
+                border-color: #ff8585;
+            }
+            QPushButton:pressed {
+                background-color: #e05858;
+                border-color: #e05858;
+            }
+        """)
         
-        button_layout.addWidget(self.add_button)
-        button_layout.addWidget(self.edit_button)
-        button_layout.addWidget(self.delete_button)
-        button_layout.addWidget(self.complete_button)
+        # 完成/未完成按钮 - 绿色
+        self.complete_button = QPushButton("完成/未完成")
+        self.complete_button.setIcon(QIcon.fromTheme("emblem-default", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)))
+        self.complete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #67c23a; 
+                color: white; 
+                border-color: #67c23a;
+            }
+            QPushButton:hover {
+                background-color: #7ed321;
+                border-color: #7ed321;
+            }
+            QPushButton:pressed {
+                background-color: #5daf34;
+                border-color: #5daf34;
+            }
+        """)
         
-        layout.addLayout(button_layout)
+        task_buttons_layout.addWidget(self.add_button)
+        task_buttons_layout.addWidget(self.edit_button)
+        task_buttons_layout.addWidget(self.delete_button)
+        task_buttons_layout.addWidget(self.complete_button)
         
-        # 功能区域
-        function_layout = QHBoxLayout()
-        function_layout.setSpacing(10)
+        tasks_layout.addLayout(task_buttons_layout)
+        main_layout.addWidget(tasks_panel, 1)  # 让任务列表区域占据更多空间
         
-        self.import_button = QPushButton("导入")
-        self.export_button = QPushButton("导出")
+        # 设置面板
+        settings_panel = QGroupBox("壁纸设置")
+        settings_layout = QVBoxLayout(settings_panel)
+        
+        # 字体大小设置
+        font_layout = QHBoxLayout()
+        font_layout.addWidget(QLabel("壁纸字体大小:"))
+        font_layout.addWidget(QLabel("小"), 0)
+        
+        self.font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_slider.setMinimum(16)
+        self.font_slider.setMaximum(40)
+        self.font_slider.setValue(self.font_size)
+        self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.font_slider.setTickInterval(4)
+        font_layout.addWidget(self.font_slider, 1)
+        
+        font_layout.addWidget(QLabel("大"), 0)
+        settings_layout.addLayout(font_layout)
+        
+        # 壁纸控制按钮
+        wallpaper_buttons = QHBoxLayout()
+        
+        self.import_button = QPushButton("导入任务")
+        self.import_button.setIcon(QIcon.fromTheme("document-open", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)))
+        
+        self.export_button = QPushButton("导出任务")
+        self.export_button.setIcon(QIcon.fromTheme("document-save", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)))
+        
+        wallpaper_buttons.addWidget(self.import_button)
+        wallpaper_buttons.addWidget(self.export_button)
+        wallpaper_buttons.addStretch(1)
+        
         self.refresh_button = QPushButton("刷新壁纸")
-        self.restore_button = QPushButton("恢复原壁纸")
-        
-        # 设置特定按钮的样式
+        self.refresh_button.setIcon(QIcon.fromTheme("view-refresh", self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)))
         self.refresh_button.setStyleSheet("""
-            background-color: #42a5f5;
-            padding: 8px 16px;
-        """)
-        self.restore_button.setStyleSheet("""
-            background-color: #78909c;
-            padding: 8px 16px;
+            QPushButton {
+                background-color: #2d8cf0;
+                color: white;
+                border-color: #2d8cf0;
+                font-weight: bold;
+                padding: 10px 16px;
+            }
+            QPushButton:hover {
+                background-color: #54a8ff;
+                border-color: #54a8ff;
+            }
+            QPushButton:pressed {
+                background-color: #2a80d8;
+                border-color: #2a80d8;
+            }
         """)
         
-        function_layout.addWidget(self.import_button)
-        function_layout.addWidget(self.export_button)
-        function_layout.addStretch()
-        function_layout.addWidget(self.refresh_button)
-        function_layout.addWidget(self.restore_button)
+        self.restore_button = QPushButton("恢复原壁纸")
+        self.restore_button.setIcon(QIcon.fromTheme("edit-undo", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton)))
         
-        layout.addLayout(function_layout)
+        wallpaper_buttons.addWidget(self.refresh_button)
+        wallpaper_buttons.addWidget(self.restore_button)
+        
+        settings_layout.addLayout(wallpaper_buttons)
+        main_layout.addWidget(settings_panel)
         
         # 连接信号
         self.add_button.clicked.connect(self.add_task)
@@ -184,20 +355,25 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export_tasks)
         self.refresh_button.clicked.connect(self.refresh_wallpaper)
         self.restore_button.clicked.connect(self.restore_wallpaper)
+        self.font_slider.valueChanged.connect(self.on_font_size_changed)
         
         # 创建系统托盘
         self.setup_tray_icon()
         
         # 加载任务
         self.load_tasks()
-    
+        
+        # 设置状态栏
+        self.statusBar().showMessage("程序已启动", 3000)
+        self.statusBar().setStyleSheet("color: #666; padding: 2px 5px;")
+
     def setup_tray_icon(self):
         """设置系统托盘图标"""
         # 创建并显示系统托盘图标
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 尝试使用内置图标
-        self.tray_icon.setIcon(QIcon.fromTheme("task-due"))
+        # 使用自定义图标
+        self.tray_icon.setIcon(create_logo())
         
         # 创建托盘菜单
         tray_menu = QMenu()
@@ -386,3 +562,46 @@ class MainWindow(QMainWindow):
                 self.toggle_task_completion()
             elif action == delete_action:
                 self.delete_task()
+    
+    def on_font_size_changed(self, value):
+        """字体大小滑块数值变化处理"""
+        self.font_size = value
+        self.settings.setValue("font_size", value)
+        # 刷新壁纸，应用新字体大小
+        if hasattr(self, 'wallpaper_manager'):
+            self.wallpaper_manager.set_font_size(value)
+            self.refresh_wallpaper()
+    
+    def on_font_changed(self, font_name):
+        """字体选择变化处理"""
+        self.font_name = font_name
+        self.settings.setValue("font_name", font_name)
+        
+        # 获取字体文件路径
+        font_file = None
+        if font_name in self.system_fonts:
+            font_file = self.system_fonts[font_name].get('file')
+        
+        # 更新壁纸管理器的字体
+        if hasattr(self, 'wallpaper_manager'):
+            success = self.wallpaper_manager.set_font(font_name, font_file)
+            if success:
+                self.refresh_wallpaper()
+                self.statusBar().showMessage(f"已设置字体: {font_name}", 3000)
+            else:
+                # 字体设置失败，还原到之前的选择
+                self.statusBar().showMessage(f"字体 '{font_name}' 不可用，将使用默认字体", 5000)
+                
+                # 还原到默认字体
+                default_font = "Microsoft YaHei"
+                index = self.font_combo.findText(default_font)
+                if index >= 0:
+                    self.font_combo.blockSignals(True)  # 暂时阻止信号触发循环
+                    self.font_combo.setCurrentIndex(index)
+                    self.font_combo.blockSignals(False)
+                    self.font_name = default_font
+                    self.settings.setValue("font_name", default_font)
+                    
+                # 使用默认字体刷新
+                self.wallpaper_manager.set_font(default_font)
+                self.refresh_wallpaper()
